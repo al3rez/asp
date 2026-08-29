@@ -20,52 +20,132 @@ congestion control, migration, NAT traversal, and routing. Performance work
 should focus on cutting semantic round trips rather than replacing those
 layers.
 
-## Why I made ASP
+## Why ASP exists
 
-SSH is good at what it was built for. It gives me a secure shell, remote
+SSH is good at what it was built for. It provides a secure shell, remote
 commands, forwarding, and a deployment model that has been tested for decades.
-I still use it to bootstrap ASP. The friction starts when a coding agent treats
-that shell as an API.
+ASP still uses SSH as a trusted bootstrap path. The friction starts when a
+coding agent treats a shell as an API.
 
 An agent may ask for the repository tree, Git status, several searches, a few
 files, test results, and a process update before it can make one decision. If
 each step is a shell command, every dependency adds another network round trip.
-The remote host scans the same workspace again, formats the result for a human,
-and sends bytes that the agent has to parse back into structure. After a broken
-connection, the agent may also have to rediscover processes and replay work the
+The remote host may scan the same workspace again, format the result for a
+human, and send bytes that the agent has to parse back into structure. After a
+broken connection, the agent may also rediscover processes or repeat work the
 server already completed. SSH multiplexing removes repeated handshakes, but it
 does not remove those application-level waits.
 
-I made ASP to test a narrow idea: a remote coding agent should talk to a durable
-session, not rebuild its world through a sequence of terminal commands. ASP
-names sessions, processes, files, artifacts, and event cursors independently of
-the current connection. A reconnect resumes known state. Stable request IDs
-make retries safe. One workspace request can return the tree, Git state,
-searches, and selected files together, while versions and digests let both
-sides skip data that has not changed.
+ASP tests a narrow idea: a remote coding agent should talk to a durable session
+instead of rebuilding its world through terminal commands. Sessions,
+processes, files, artifacts, and event cursors exist independently of the
+current connection. Stable request IDs make retries safe. One workspace request
+can return the tree, Git state, searches, and selected files together. Versions
+and digests let both sides skip data that has not changed.
 
-The same distinction matters for output. If an agent asks for every byte, ASP
-keeps and transfers every byte; there is no magic bandwidth saving. When the
-agent only needs an exit code and a bounded diagnostic tail, `EXEC_SUMMARY`
-returns that small result and leaves the complete log on the remote host for
-later retrieval. File writes use hashes and versions to catch concurrent edits,
-and localized changes can use a patch instead of sending the whole file.
-
-The early results support the idea, with an important caveat. In 30 paired
-single-container trials at about 100 ms RTT, ASP's median wall time was 3.24
-seconds versus 9.48 seconds for warm SSH plus its agent path; median recovery
-was 341 ms versus 1.57 seconds. With incompressible exact output, ASP still
-finished sooner but used 2.5% more bytes. Switching that workload to
-`EXEC_SUMMARY` cut the application payload by 99.92% while preserving the full
-remote log. These are controlled pilot measurements, not a general WAN claim.
-The two-host qualification in [TODO.md](TODO.md) is still required.
-
-ASP does not replace SSH, Mosh, RoSE, Quinn, or Tailscale. SSH remains the
-strongest simple baseline, and a small semantic daemon over SSH may prove good
-enough for some workloads. ASP exists to find out whether durable,
-agent-oriented semantics earn their extra complexity. The detailed argument
-and the conditions that would falsify it are in
+This is not a claim that SSH is obsolete. A small semantic daemon over SSH may
+be enough for many workloads and remains the strongest simpler baseline. The
+full argument and its falsification criteria are in
 [docs/PROBLEM.md](docs/PROBLEM.md).
+
+## Daily use
+
+The simplest daily setup uses ASP as the outer remote-session layer:
+
+```text
+laptop -> Tailscale -> ASP -> Claude or Codex
+```
+
+Set the endpoint and credential paths once on the client:
+
+```sh
+export ASP_SERVER=devbox:4433
+export ASP_CERT="$HOME/.config/asp/servers/devbox/server-cert.der"
+export ASP_AUTH_TOKEN_FILE="$HOME/.config/asp/servers/devbox/auth-token"
+```
+
+Check the connection, open the durable shell, and start the agent normally:
+
+```sh
+asp doctor --strict
+asp shell
+cd /path/to/project
+claude
+```
+
+Use `codex` instead of `claude` when needed. If the laptop sleeps or the
+connection drops, run `asp shell` again. ASP reconnects to the existing
+tmux-backed PTY, so the agent process keeps running.
+
+For one workspace and one active agent, zmx is redundant: ASP already owns the
+durable tmux session. zmx can still help when several named Claude/Codex
+sessions need to coexist, multiple clients must share one session, or an extra
+persistence layer independent of ASP is useful. In that case the existing
+workflow can stay inside ASP:
+
+```sh
+asp shell
+zmx attach project-claude claude
+```
+
+The `aspd` service account must be able to read the repository and the selected
+agent's configuration and credentials. Give that account only the access it
+needs. ASP executes commands as that account and is not a sandbox.
+
+## Is it better than SSH plus zmx or tmux?
+
+Not significantly for a terminal-only workflow, at least not based on the
+current evidence. Replacing `ssh -> zmx -> claude` with `asp shell -> claude`
+mainly changes reconnection and session ownership. Both approaches keep the
+remote agent alive after the laptop disconnects.
+
+| Area | SSH plus zmx/tmux | ASP shell |
+|---|---|---|
+| Persistent agent process | Yes | Yes |
+| Reconnect after a network break | Reconnect and reattach | Automatic retry and PTY reattach |
+| Sleep or path changes | Reconnect manually | Designed to reconnect and resume |
+| Keystroke latency | Normal SSH behavior | Not yet proven to match Mosh or RoSE |
+| Structured agent operations | Requires another agent daemon | Built into ASP |
+| Exact-output bandwidth | Mature and efficient | Can be slightly higher |
+| Operational maturity | Decades of production use | Hardened single-user pilot |
+
+ASP becomes more interesting when the coding agent uses its semantic operations
+instead of treating the remote machine as a terminal. `WORKSPACE_STATE` can
+combine repository inspection into one request. `EXEC_SUMMARY` returns an exit
+code and bounded diagnostic tails while leaving the complete log on the remote
+host. Hash-aware file operations catch concurrent edits and can send a small
+patch instead of a complete file.
+
+The existing controlled fixture measured a 3.24-second median wall time for ASP
+versus 9.48 seconds for warm SSH plus its agent path at about 100 ms RTT. Median
+recovery was 341 ms versus 1.57 seconds. Those were 30 paired trials in one
+shaped container, not measurements of the normal Claude or Codex TUI and not a
+general WAN claim. With incompressible exact output, ASP finished sooner but
+used 2.5% more bytes. `EXEC_SUMMARY` reduced that workload's application
+payload by 99.92% because it changed the contract and retained the full log
+remotely.
+
+Running Claude or Codex inside `asp shell` does not automatically unlock those
+semantic gains. ASP currently ships a persistent JSONL adapter, but it does not
+ship a Claude/Codex integration that redirects their tool calls through it. A
+future integration can keep the adapter warm under a client-side supervisor:
+
+```sh
+asp agent-listen /absolute/private/path/asp-agent.sock
+```
+
+The integration would send JSONL requests through the private socket:
+
+```sh
+asp agent-connect /absolute/private/path/asp-agent.sock
+```
+
+Until that integration and the two-host qualification are complete, the
+practical approach is conservative: keep SSH plus zmx as the dependable
+baseline, run ASP alongside it for daily pilot use, and compare both with real
+Claude/Codex sessions across sleep, Wi-Fi changes, and network loss. Switch the
+primary workflow when ASP proves better on those workloads, not merely because
+it uses QUIC.
 
 For a reproducible container deployment, see [deploy/container/README.md](deploy/container/README.md); it is a deployment boundary, not a hostile-command sandbox. EXEC/SPAWN and tmux-backed PTYs can run through an operator-supplied absolute `--process-launcher` (for example a reviewed supervisor wrapper); use `--require-process-launcher` when startup must fail closed without that boundary. The launcher must be a private, regular executable: group/world-writable launchers are rejected, ASP canonicalizes the path and binds its startup filesystem identity, and same-path or ancestor-redirection replacement is refused until restart. The launcher must `exec` its arguments (including the absolute tmux command) so durable process identity remains observable. For a deployment that must refuse unsafe defaults, add `--production`: it requires authenticated clients, loopback readiness/metrics, a configured process boundary, a non-group/world-writable workspace path and non-sticky ancestors, nonzero CPU/wall-clock limits, an explicit port policy (`--port-target HOST:PORT` or `--disable-port-forwarding`), and automatically enables Quinn stateless address validation before the daemon initializes.
 
