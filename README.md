@@ -1,5 +1,25 @@
 # ASP — Agent Session Protocol
 
+## Project status
+
+ASP is ready for daily use as a supervised, single-user pilot behind Tailscale
+or another private network. It is not ready for broad production, public
+Internet exposure, or multi-tenant use.
+
+Most of the remaining work is outside the core protocol: two-host network
+qualification, real mixed-version upgrades, site-owned operational controls,
+capacity testing, release qualification, and an independent security review.
+See [TODO.md](TODO.md) for the open work and
+[docs/PRODUCTION_READINESS.md](docs/PRODUCTION_READINESS.md) for the full gates
+and supporting evidence.
+
+ASP is not a sandbox. A production-shaped pilot still needs a supervisor, a
+reviewed process boundary, durable storage, backups, monitoring, and private
+network access. Keep Quinn and Tailscale responsible for transport security,
+congestion control, migration, NAT traversal, and routing. Performance work
+should focus on cutting semantic round trips rather than replacing those
+layers.
+
 For a reproducible container deployment, see [deploy/container/README.md](deploy/container/README.md); it is a deployment boundary, not a hostile-command sandbox. EXEC/SPAWN and tmux-backed PTYs can run through an operator-supplied absolute `--process-launcher` (for example a reviewed supervisor wrapper); use `--require-process-launcher` when startup must fail closed without that boundary. The launcher must be a private, regular executable: group/world-writable launchers are rejected, ASP canonicalizes the path and binds its startup filesystem identity, and same-path or ancestor-redirection replacement is refused until restart. The launcher must `exec` its arguments (including the absolute tmux command) so durable process identity remains observable. For a deployment that must refuse unsafe defaults, add `--production`: it requires authenticated clients, loopback readiness/metrics, a configured process boundary, a non-group/world-writable workspace path and non-sticky ancestors, nonzero CPU/wall-clock limits, an explicit port policy (`--port-target HOST:PORT` or `--disable-port-forwarding`), and automatically enables Quinn stateless address validation before the daemon initializes.
 
 The production profile also requires `--min-free-bytes BYTES`; readiness drops
@@ -287,7 +307,7 @@ migration` or `sleep-wake`; the hook runs on the client in both paired legs and
 rows record whether it completed. Runs without a hook explicitly do not claim
 physical roaming.
 
-See [docs/PROTOCOL.md](docs/PROTOCOL.md), [docs/SCHEMA.md](docs/SCHEMA.md), [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), the evidence-backed [docs/CONCLUSIONS.md](docs/CONCLUSIONS.md), the [operations runbook](docs/OPERATIONS.md), and the explicit [production-readiness gates](docs/PRODUCTION_READINESS.md). The prototype uses a pinned self-signed server certificate and a per-workspace bearer token; use a private network (for example Tailscale) or add a production identity/bootstrap layer before exposing it to an untrusted network.
+See [docs/PROTOCOL.md](docs/PROTOCOL.md), [docs/SCHEMA.md](docs/SCHEMA.md), [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), the evidence-backed [docs/CONCLUSIONS.md](docs/CONCLUSIONS.md), the [operations runbook](docs/OPERATIONS.md), the short [production TODO](TODO.md), and the explicit [production-readiness gates](docs/PRODUCTION_READINESS.md). The prototype uses a pinned self-signed server certificate and a per-workspace bearer token; use a private network (for example Tailscale) or add a production identity/bootstrap layer before exposing it to an untrusted network.
 
 ## Quick start
 
