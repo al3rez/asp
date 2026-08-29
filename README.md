@@ -20,6 +20,53 @@ congestion control, migration, NAT traversal, and routing. Performance work
 should focus on cutting semantic round trips rather than replacing those
 layers.
 
+## Why I made ASP
+
+SSH is good at what it was built for. It gives me a secure shell, remote
+commands, forwarding, and a deployment model that has been tested for decades.
+I still use it to bootstrap ASP. The friction starts when a coding agent treats
+that shell as an API.
+
+An agent may ask for the repository tree, Git status, several searches, a few
+files, test results, and a process update before it can make one decision. If
+each step is a shell command, every dependency adds another network round trip.
+The remote host scans the same workspace again, formats the result for a human,
+and sends bytes that the agent has to parse back into structure. After a broken
+connection, the agent may also have to rediscover processes and replay work the
+server already completed. SSH multiplexing removes repeated handshakes, but it
+does not remove those application-level waits.
+
+I made ASP to test a narrow idea: a remote coding agent should talk to a durable
+session, not rebuild its world through a sequence of terminal commands. ASP
+names sessions, processes, files, artifacts, and event cursors independently of
+the current connection. A reconnect resumes known state. Stable request IDs
+make retries safe. One workspace request can return the tree, Git state,
+searches, and selected files together, while versions and digests let both
+sides skip data that has not changed.
+
+The same distinction matters for output. If an agent asks for every byte, ASP
+keeps and transfers every byte; there is no magic bandwidth saving. When the
+agent only needs an exit code and a bounded diagnostic tail, `EXEC_SUMMARY`
+returns that small result and leaves the complete log on the remote host for
+later retrieval. File writes use hashes and versions to catch concurrent edits,
+and localized changes can use a patch instead of sending the whole file.
+
+The early results support the idea, with an important caveat. In 30 paired
+single-container trials at about 100 ms RTT, ASP's median wall time was 3.24
+seconds versus 9.48 seconds for warm SSH plus its agent path; median recovery
+was 341 ms versus 1.57 seconds. With incompressible exact output, ASP still
+finished sooner but used 2.5% more bytes. Switching that workload to
+`EXEC_SUMMARY` cut the application payload by 99.92% while preserving the full
+remote log. These are controlled pilot measurements, not a general WAN claim.
+The two-host qualification in [TODO.md](TODO.md) is still required.
+
+ASP does not replace SSH, Mosh, RoSE, Quinn, or Tailscale. SSH remains the
+strongest simple baseline, and a small semantic daemon over SSH may prove good
+enough for some workloads. ASP exists to find out whether durable,
+agent-oriented semantics earn their extra complexity. The detailed argument
+and the conditions that would falsify it are in
+[docs/PROBLEM.md](docs/PROBLEM.md).
+
 For a reproducible container deployment, see [deploy/container/README.md](deploy/container/README.md); it is a deployment boundary, not a hostile-command sandbox. EXEC/SPAWN and tmux-backed PTYs can run through an operator-supplied absolute `--process-launcher` (for example a reviewed supervisor wrapper); use `--require-process-launcher` when startup must fail closed without that boundary. The launcher must be a private, regular executable: group/world-writable launchers are rejected, ASP canonicalizes the path and binds its startup filesystem identity, and same-path or ancestor-redirection replacement is refused until restart. The launcher must `exec` its arguments (including the absolute tmux command) so durable process identity remains observable. For a deployment that must refuse unsafe defaults, add `--production`: it requires authenticated clients, loopback readiness/metrics, a configured process boundary, a non-group/world-writable workspace path and non-sticky ancestors, nonzero CPU/wall-clock limits, an explicit port policy (`--port-target HOST:PORT` or `--disable-port-forwarding`), and automatically enables Quinn stateless address validation before the daemon initializes.
 
 The production profile also requires `--min-free-bytes BYTES`; readiness drops
