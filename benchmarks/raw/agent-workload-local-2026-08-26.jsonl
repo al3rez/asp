@@ -1,0 +1,1 @@
+{"experiment":"agent-workload","system":"asp","scenario":"loopback-release-disconnect-2s","application_round_trips":12,"transport_connections":2,"application_payload_bytes":10485979,"wall_ms":3989.012333,"network_blocked_ms":926.280499,"recovery_ms":1.563416,"disconnect_seconds":2,"resumed_events":3,"persistent_process_observed":true,"status":0}

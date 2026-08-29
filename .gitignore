@@ -1,0 +1,10 @@
+/target
+/target 2
+*.o
+/.asp
+/.asp-session
+*.asp-download
+*.asp-download.meta
+*.asp-download.lock
+*.asp-upload
+*.asp-upload.lock

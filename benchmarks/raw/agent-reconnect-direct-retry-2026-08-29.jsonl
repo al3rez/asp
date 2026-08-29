@@ -1,0 +1,1 @@
+{"experiment":"agent-reconnect-direct-retry","host":"macos-arm64-loopback","profile":"release","lost_response_after_admission":true,"exactly_one_side_effect_result":true,"read_resume_delta":0,"log_resume_delta":0,"side_effect_resume_delta":0,"status":0}

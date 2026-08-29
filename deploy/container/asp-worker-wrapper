@@ -1,0 +1,14 @@
+#!/bin/sh
+# The container's cgroup, read-only root, and no-new-privileges settings are
+# the process boundary.  This tiny launcher is deliberately only an exec
+# shim: keeping it separate lets aspd bind and recheck one immutable path for
+# EXEC, SPAWN, Git helpers, and tmux PTYs without pretending that a shell
+# wrapper is a sandbox.
+set -eu
+
+if [ "$#" -eq 0 ]; then
+    echo 'asp-worker-wrapper: missing command' >&2
+    exit 64
+fi
+
+exec "$@"

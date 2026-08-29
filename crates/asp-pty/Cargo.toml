@@ -1,0 +1,16 @@
+[package]
+name = "asp-pty"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description.workspace = true
+readme.workspace = true
+publish = false
+
+[dependencies]
+anyhow.workspace = true
+libc.workspace = true
+portable-pty.workspace = true
+tokio.workspace = true
+vt100.workspace = true

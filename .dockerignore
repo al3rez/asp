@@ -1,0 +1,9 @@
+# The benchmark image builds the Rust workspace from source.  Keep local build
+# outputs and daemon state out of the Docker build context; `target/` can be
+# several gigabytes and otherwise makes every image rebuild needlessly slow.
+target/
+.asp/
+.asp-session*
+benchmarks/raw/
+.git/
+.DS_Store

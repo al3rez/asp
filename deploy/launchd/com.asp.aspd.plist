@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.asp.aspd</string>
+
+	<!-- Replace /Users/asp/asp-workspace with the real workspace path. -->
+	<key>ProgramArguments</key>
+	<array>
+		<!-- `deploy/install-release.sh` atomically publishes this pointer. -->
+		<string>/usr/local/lib/asp/current/bin/aspd</string>
+		<string>--listen</string>
+		<string>127.0.0.1:4433</string>
+		<string>--root</string>
+		<string>/Users/asp/asp-workspace</string>
+		<string>--health-listen</string>
+		<string>127.0.0.1:9443</string>
+		<string>--exec-timeout-seconds</string>
+		<string>3600</string>
+		<string>--min-free-bytes</string>
+		<string>1073741824</string>
+		<string>--artifact-retention-hours</string>
+		<string>720</string>
+		<string>--disable-port-forwarding</string>
+	</array>
+	<key>WorkingDirectory</key>
+	<string>/Users/asp/asp-workspace</string>
+
+	<key>RunAtLoad</key>
+	<true/>
+	<key>KeepAlive</key>
+	<true/>
+	<key>ThrottleInterval</key>
+	<integer>1</integer>
+
+	<!-- Keep EXEC children alive while launchd restarts only aspd. -->
+	<key>AbandonProcessGroup</key>
+	<true/>
+	<key>Umask</key>
+	<integer>63</integer>
+	<!-- Bound daemon descriptors/processes; tune for the host workload. -->
+	<key>HardResourceLimits</key>
+	<dict>
+		<key>NumberOfFiles</key>
+		<integer>65536</integer>
+		<key>NumberOfProcesses</key>
+		<integer>512</integer>
+	</dict>
+	<key>SoftResourceLimits</key>
+	<dict>
+		<key>NumberOfFiles</key>
+		<integer>65536</integer>
+		<key>NumberOfProcesses</key>
+		<integer>512</integer>
+	</dict>
+	<key>StandardOutPath</key>
+	<string>/Users/asp/asp-workspace/.asp/launchd.stdout.log</string>
+	<key>StandardErrorPath</key>
+	<string>/Users/asp/asp-workspace/.asp/launchd.stderr.log</string>
+</dict>
+</plist>

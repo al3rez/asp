@@ -1,0 +1,57 @@
+[workspace]
+members = [
+    "crates/asp-protocol",
+    "crates/asp-client",
+    "crates/asp-server",
+    "crates/asp-pty",
+    "crates/asp-bench",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0 OR MIT"
+rust-version = "1.88"
+description = "Agent-native remote development sessions over QUIC"
+readme = "README.md"
+
+[workspace.dependencies]
+anyhow = "1.0"
+base64 = "0.22"
+bytes = { version = "1.10", features = ["serde"] }
+clap = { version = "4.5", features = ["derive", "env"] }
+crc32fast = "1.4"
+fs2 = "0.4"
+# Pure-Rust, fast zlib backend for the bounded v17 stream-frame envelope.
+# Frames are compressed only after a strict byte-win check.
+flate2 = { version = "1.1", default-features = false, features = ["rust_backend"] }
+libc = "0.2"
+notify = { version = "8.2", default-features = false, features = ["macos_fsevent"] }
+portable-pty = "0.9"
+# ASP only uses the host-side alloc serializer. Disable postcard's embedded
+# `heapless-cas` default so the production dependency graph does not pull the
+# unmaintained `atomic-polyfill` crate into every binary.
+postcard = { version = "1.1", default-features = false, features = ["alloc"] }
+# Only the Tokio runtime and rustls-ring integration are needed. The default
+# platform verifier/log features add dependencies that are not used by ASP's
+# pinned-certificate path; Quinn's bloom token log remains enabled.
+quinn = { version = "0.11", default-features = false, features = ["runtime-tokio", "rustls-ring", "bloom"] }
+rcgen = "0.13"
+# Quinn is configured for rustls-ring, and the code installs that mature
+# provider explicitly. Avoid pulling rustls' default AWS-LC backend as a
+# second crypto implementation into every binary.
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sha2 = "0.10"
+subtle = "2.6"
+tokio = { version = "1.44", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid = { version = "1.16", features = ["v4", "serde"] }
+vt100 = "0.16"
+
+[profile.release]
+strip = "symbols"
+lto = "thin"

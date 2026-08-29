@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.asp.aspd.production</string>
+
+	<!-- Replace /Users/asp/asp-workspace with the real workspace path. -->
+	<key>ProgramArguments</key>
+	<array>
+		<!-- `deploy/install-release.sh` atomically publishes this pointer. -->
+		<string>/usr/local/lib/asp/current/bin/aspd</string>
+		<string>--production</string>
+		<string>--listen</string>
+		<string>0.0.0.0:4433</string>
+		<string>--allow-non-loopback</string>
+		<string>--stateless-retry</string>
+		<string>--root</string>
+		<string>/Users/asp/asp-workspace</string>
+		<string>--cert</string>
+		<string>/Users/asp/asp-workspace/.asp/server-cert.der</string>
+		<string>--key</string>
+		<string>/Users/asp/asp-workspace/.asp/server-key.der</string>
+		<string>--auth-token-file</string>
+		<string>/Users/asp/asp-workspace/.asp/auth-token</string>
+		<string>--process-launcher</string>
+		<string>/usr/local/libexec/asp-worker-wrapper</string>
+		<string>--require-process-launcher</string>
+		<string>--process-memory-bytes</string>
+		<string>2147483648</string>
+		<string>--process-cpu-seconds</string>
+		<string>86400</string>
+		<string>--exec-timeout-seconds</string>
+		<string>3600</string>
+		<string>--min-free-bytes</string>
+		<string>1073741824</string>
+		<string>--health-listen</string>
+		<string>127.0.0.1:9443</string>
+		<string>--artifact-retention-hours</string>
+		<string>720</string>
+		<string>--disable-port-forwarding</string>
+	</array>
+	<key>WorkingDirectory</key>
+	<string>/Users/asp/asp-workspace</string>
+
+	<key>RunAtLoad</key>
+	<true/>
+	<key>KeepAlive</key>
+	<true/>
+	<key>ThrottleInterval</key>
+	<integer>1</integer>
+
+	<!-- Keep EXEC children alive while launchd restarts only aspd. -->
+	<key>AbandonProcessGroup</key>
+	<true/>
+	<key>Umask</key>
+	<integer>63</integer>
+	<key>HardResourceLimits</key>
+	<dict>
+		<key>NumberOfFiles</key>
+		<integer>65536</integer>
+		<key>NumberOfProcesses</key>
+		<integer>512</integer>
+	</dict>
+	<key>SoftResourceLimits</key>
+	<dict>
+		<key>NumberOfFiles</key>
+		<integer>65536</integer>
+		<key>NumberOfProcesses</key>
+		<integer>512</integer>
+	</dict>
+	<key>StandardOutPath</key>
+	<string>/Users/asp/asp-workspace/.asp/launchd-production.stdout.log</string>
+	<key>StandardErrorPath</key>
+	<string>/Users/asp/asp-workspace/.asp/launchd-production.stderr.log</string>
+</dict>
+</plist>

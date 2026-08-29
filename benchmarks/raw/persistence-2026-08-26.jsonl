@@ -1,0 +1,4 @@
+{"experiment":"process-resume","host":"macos-arm64-loopback","disconnect_seconds":30,"command":"sleep 30; printf thirty-second-resume-ok","output_replayed":true,"exit_code":0,"result":"pass"}
+{"experiment":"process-resume","host":"macos-arm64-loopback","disconnect_seconds":2,"command":"sleep 2; printf persistent-process-finished","output_replayed":true,"exit_code":0,"result":"pass"}
+{"experiment":"file-put-patch","host":"macos-arm64-loopback","put_version":1,"patch_version":2,"base_hash_verified":true,"result":"pass"}
+{"experiment":"large-output-retention","host":"macos-arm64-local-test","command":"yes x | head -c 10485760","live_output_bytes":10485760,"retained_output_bytes":10485760,"exit_code":0,"result":"pass"}

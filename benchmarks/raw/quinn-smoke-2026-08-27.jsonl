@@ -1,0 +1,5 @@
+{"experiment":"quinn-smoke","host":"macos-arm64-loopback","profile":"release-shared-transport","sample":1,"handshake_us":1349,"stream_rtt_us":202,"datagram_rtt_us":71,"rebind_stream_rtt_us":193,"udp_tx":17,"udp_rx":15}
+{"experiment":"quinn-smoke","host":"macos-arm64-loopback","profile":"release-shared-transport","sample":2,"handshake_us":1262,"stream_rtt_us":154,"datagram_rtt_us":82,"rebind_stream_rtt_us":174,"udp_tx":17,"udp_rx":16}
+{"experiment":"quinn-smoke","host":"macos-arm64-loopback","profile":"release-shared-transport","sample":3,"handshake_us":1572,"stream_rtt_us":369,"datagram_rtt_us":189,"rebind_stream_rtt_us":278,"udp_tx":17,"udp_rx":16}
+{"experiment":"quinn-smoke","host":"macos-arm64-loopback","profile":"release-shared-transport","sample":4,"handshake_us":1718,"stream_rtt_us":251,"datagram_rtt_us":110,"rebind_stream_rtt_us":255,"udp_tx":16,"udp_rx":16}
+{"experiment":"quinn-smoke","host":"macos-arm64-loopback","profile":"release-shared-transport","sample":5,"handshake_us":1787,"stream_rtt_us":181,"datagram_rtt_us":79,"rebind_stream_rtt_us":205,"udp_tx":18,"udp_rx":15}

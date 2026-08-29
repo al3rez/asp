@@ -1,0 +1,1 @@
+{"experiment":"quinn-smoke","host":"macos-arm64-loopback","profile":"release-shared-transport","sample":1,"handshake_us":1278,"stream_rtt_us":321,"datagram_rtt_us":87,"rebind_stream_rtt_us":197,"udp_tx":16,"udp_rx":16,"status":0}

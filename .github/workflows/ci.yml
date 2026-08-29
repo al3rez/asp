@@ -1,0 +1,775 @@
+name: Rust CI
+
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: '17 3 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rust-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: format, lint, test, build
+    if: github.event_name != 'schedule'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Check out source
+        # v4.4.0 (tag 11d5960a326750d5838078e36cf38b85af677262)
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: Install pinned Rust toolchain
+        # stable branch at 4360b52568e2003a75bf9bc1d59f33a8e3fc893c
+        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c
+        with:
+          toolchain: 1.88.0
+          components: rustfmt, clippy
+
+      - name: Cache Cargo artifacts
+        # v2 tag commit 6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Check locked metadata and shipped docs/scripts
+        run: |
+          cargo metadata --locked --no-deps --format-version 1 >/dev/null
+          if grep -Eq '^[[:space:]]+uses: .+@(v[0-9]|stable|main|master|latest)([[:space:]]|$)' .github/workflows/ci.yml; then
+            echo 'workflow actions must be pinned to immutable commit SHAs' >&2
+            exit 1
+          fi
+          # Executable crates are intentionally `publish = false`; validate
+          # their package manifests/source lists while fully verifying the
+          # publishable wire-format library below.
+          cargo package --locked --workspace --no-verify --list >/dev/null
+          cargo package --locked -p asp-protocol >/dev/null
+          protocol_archive="$(find target/package -maxdepth 1 -name 'asp-protocol-*.crate' -print -quit)"
+          test -n "$protocol_archive"
+          protocol_extract="$(mktemp -d)"
+          tar -xzf "$protocol_archive" -C "$protocol_extract"
+          protocol_manifest="$(find "$protocol_extract" -mindepth 2 -maxdepth 2 -name Cargo.toml -print -quit)"
+          test -n "$protocol_manifest"
+          cargo test --locked \
+            --manifest-path "$protocol_manifest" \
+            --all-targets --release
+          bash -n benchmarks/*.sh deploy/*.sh tools/*.sh
+          # Every checked-in shell helper is part of the operator/qualification
+          # surface. Keep executable bits consistent so fresh checkouts and CI
+          # invoke the same scripts as the source tree.
+          while IFS= read -r -d '' path; do
+            test -x "$path"
+          done < <(find benchmarks deploy tools -type f -name '*.sh' -print0)
+          for path in \
+            docs/research/mosh.md \
+            docs/research/mosh-source.md \
+            docs/research/rose.md \
+            docs/research/quic.md \
+            docs/research/quic-datagrams.md \
+            docs/research/tailscale.md \
+            docs/research/plan9.md \
+            docs/research/eternal-terminal.md \
+            docs/research/file-sync.md \
+            docs/PROBLEM.md \
+            docs/ARCHITECTURE.md \
+            docs/PROTOCOL.md \
+            docs/EVENT_MODEL.md \
+            docs/BENCHMARKS.md \
+            docs/PRODUCTION_READINESS.md \
+            docs/OPERATIONS.md \
+            docs/SCHEMA.md \
+            docs/CONCLUSIONS.md; do
+            test -s "$path"
+          done
+          test -s deploy/container/Dockerfile
+          test -s deploy/container/README.md
+          test -s deploy/container/asp-worker-wrapper
+          test -s deploy/systemd/aspd-production.service
+          test -s deploy/launchd/com.asp.aspd-production.plist
+          test -s LICENSE-MIT
+          test -s LICENSE-APACHE
+          test -s crates/asp-protocol/schema.json
+          grep -q '"pty_rich_state"' docs/schema.json
+          grep -q '"pty_rich_state"' crates/asp-protocol/schema.json
+          grep -q '"pty_rich_compression"' docs/schema.json
+          grep -q '"pty_rich_compression"' crates/asp-protocol/schema.json
+          grep -q 'pty_rich_state' docs/PROTOCOL.md
+          grep -q 'pty_rich_compression' docs/PROTOCOL.md
+          grep -q 'pty_state_delta' docs/PROTOCOL.md
+          grep -q '"pty_state_delta"' docs/schema.json
+          grep -q '"pty_state_delta"' crates/asp-protocol/schema.json
+          grep -q 'pty_scrollback' docs/PROTOCOL.md
+          grep -q '"pty_scrollback"' docs/schema.json
+          grep -q '"pty_scrollback"' crates/asp-protocol/schema.json
+          grep -q 'PtyReadyScrollback' crates/asp-protocol/src/lib.rs
+          grep -q 'PtyReadyRich' crates/asp-protocol/src/lib.rs
+          grep -q 'PtyStateDeltaDatagram' crates/asp-protocol/src/lib.rs
+          grep -q 'rich_snapshot' crates/asp-pty/src/lib.rs
+          grep -q 'snapshot_cache_stats' crates/asp-pty/src/lib.rs
+          grep -q 'pty_snapshot_cache_hits_total' crates/asp-server/src/main.rs
+          grep -q 'pty_state_delta_datagrams_sent_total' crates/asp-server/src/main.rs
+          grep -q 'process_log_sync_total' crates/asp-server/src/main.rs
+          grep -q 'resume_replay_limited_total' crates/asp-server/src/main.rs
+          grep -q 'config.migration(true)' crates/asp-server/src/main.rs
+          grep -q 'asp_process_launch_duration_us' crates/asp-server/src/main.rs
+          grep -q 'process_launch_sum_delta_us' benchmarks/smoke-capacity-soak.sh
+          grep -q -- '--prefer-pty-delta' benchmarks/smoke-pty-reconnect.sh
+          grep -q 'ensure_tmux_available' crates/asp-pty/src/lib.rs
+          test -x deploy/package-release.sh
+          test -x deploy/verify-release.sh
+          test -x deploy/install-release.sh
+          test -x deploy/upgrade-release.sh
+          test -x deploy/bootstrap-client.sh
+          test -x deploy/generate-sbom.sh
+          test -x deploy/sign-release.sh
+          test -x deploy/verify-release-signature.sh
+          grep -q -- '--signature' deploy/install-release.sh
+          grep -q -- '--fingerprint' deploy/upgrade-release.sh
+          grep -q -- '--require-signature' deploy/install-release.sh
+          grep -q -- '--require-signature' deploy/upgrade-release.sh
+          grep -q 'sign-release.sh' README.md
+          grep -q 'verify-release-signature.sh' docs/OPERATIONS.md
+          test -x tools/zig-cc.sh
+          test -x tools/zig-ar.sh
+          test -x tools/zig-windows-cc.sh
+          test -x tools/zig-windows-ar.sh
+          test -x tools/check-windows-gnu.sh
+          test -x benchmarks/qualify-results.sh
+          test -x benchmarks/compare-agent-contracts.sh
+          grep -q 'production agent-workload rows' benchmarks/qualify-results.sh
+          test -x benchmarks/smoke-protocol-fuzz.sh
+          grep -q 'network-event kind' benchmarks/compare-agent-contracts.sh
+          test -x benchmarks/docker-agent-matrix.sh
+          test -x benchmarks/two-host-agent-matrix.sh
+          test -x benchmarks/two-host-agent-grid.sh
+          test -x benchmarks/two-host-agent-worker.sh
+          test -x benchmarks/smoke-two-host-contract.sh
+          grep -q -- '--network-event-hook' benchmarks/two-host-agent-matrix.sh
+          grep -q -- '--network-event-kind' benchmarks/two-host-agent-grid.sh
+          grep -q 'result_sha256' benchmarks/two-host-agent-grid.sh
+          grep -q 'validate_cell_capture' benchmarks/two-host-agent-grid.sh
+          grep -q 'network_event_completed' benchmarks/two-host-agent-worker.sh
+          grep -q -- '--network-event-hook' benchmarks/smoke-two-host-contract.sh
+          grep -q 'ConnectTimeout=20' deploy/bootstrap-client.sh
+          grep -q 'ServerAliveInterval=5' deploy/bootstrap-client.sh
+          test -x benchmarks/smoke-client-failure-cleanup.sh
+          test -x benchmarks/smoke-connect-idempotency.sh
+          test -x benchmarks/smoke-agent-reconnect.sh
+          test -x benchmarks/smoke-events-reconnect.sh
+          test -x benchmarks/smoke-file-events.sh
+          test -x benchmarks/smoke-concurrent-agents.sh
+          test -x benchmarks/smoke-capacity-soak.sh
+          test -x benchmarks/smoke-process-launcher.sh
+          test -x benchmarks/smoke-transfer-restart.sh
+          test -x benchmarks/smoke-mixed-release.sh
+          test -x benchmarks/smoke-packaged-runtime.sh
+          test -x benchmarks/smoke-upgrade-release.sh
+          test -x benchmarks/smoke-release-signature.sh
+          grep -q 'smoke-release-signature.sh "\$archive" "\$checksum"' .github/workflows/ci.yml
+          test -x benchmarks/smoke-capacity-rejection.sh
+          test -x benchmarks/smoke-consumer-cursors.sh
+          test -x benchmarks/smoke-event-cursor-safety.sh
+          grep -q 'after-path' benchmarks/smoke-udp-proxy.sh
+          grep -q 'sleep 17' benchmarks/smoke-udp-proxy.sh
+          grep -q 'doctor --strict' benchmarks/smoke-production-policy.sh
+          grep -q -- '--ready-url' benchmarks/smoke-production-policy.sh
+          grep -q -- '--production' benchmarks/smoke-mtls-ca-rotation.sh
+          grep -q -- '--health-listen' benchmarks/smoke-mtls-ca-rotation.sh
+          grep -q -- '--require-process-launcher' benchmarks/smoke-mtls-ca-rotation.sh
+          grep -q -- '--ready-url' benchmarks/smoke-mtls-ca-rotation.sh
+          grep -q 'doctor --strict' benchmarks/smoke-container.sh
+          grep -q -- '--ready-url' benchmarks/smoke-container.sh
+          grep -q '^HEALTHCHECK ' deploy/container/Dockerfile
+          grep -q '/ready' deploy/container/Dockerfile
+          grep -q '^STOPSIGNAL SIGTERM$' deploy/container/Dockerfile
+          grep -q '"--production"' deploy/container/Dockerfile
+          grep -q '"--process-launcher", "/usr/local/libexec/asp-worker-wrapper"' deploy/container/Dockerfile
+          grep -q '"--require-process-launcher"' deploy/container/Dockerfile
+          grep -q '"--stateless-retry"' deploy/container/Dockerfile
+          grep -q 'chmod 0555 /usr/local/libexec/asp-worker-wrapper' deploy/container/Dockerfile
+          grep -Eq 'ca-certificates curl git tmux' deploy/container/Dockerfile
+          grep -q '^FROM rust:1.88-bookworm@sha256:' deploy/container/Dockerfile
+          grep -q '^FROM debian:bookworm-slim@sha256:' deploy/container/Dockerfile
+          grep -q '^FROM rust:1.88-bookworm@sha256:' benchmarks/Dockerfile
+          grep -q -- '--uid 10001 --gid 10001' deploy/container/Dockerfile
+          grep -q 'docker volume create asp-workspace' deploy/container/README.md
+          grep -q -- '--stop-timeout=30' deploy/container/README.md
+          grep -q '^RUN cargo build --locked --release --workspace$' benchmarks/Dockerfile
+          test "$(grep -c '^KillMode=process$' deploy/systemd/aspd.service)" -eq 1
+          test "$(grep -c '^TimeoutStopSec=30s$' deploy/systemd/aspd.service)" -eq 1
+          test "$(grep -c '^PrivateTmp=false$' deploy/systemd/aspd.service)" -eq 1
+          test "$(grep -c '^ProtectSystem=strict$' deploy/systemd/aspd.service)" -eq 1
+          test "$(grep -c '^ExecStartPre=/usr/local/lib/asp/current/bin/aspd' deploy/systemd/aspd.service)" -eq 1
+          test "$(grep -c '^ExecStart=/usr/local/lib/asp/current/bin/aspd' deploy/systemd/aspd.service)" -eq 1
+          test "$(grep -c '^ConditionPathIsExecutable=/usr/local/libexec/asp-worker-wrapper$' deploy/systemd/aspd-production.service)" -eq 1
+          test "$(grep -c -- '--production' deploy/systemd/aspd-production.service)" -eq 2
+          test "$(grep -c -- '--require-process-launcher' deploy/systemd/aspd-production.service)" -eq 2
+          test "$(grep -c -- '--stateless-retry' deploy/systemd/aspd-production.service)" -eq 2
+          test "$(grep -c -- '--process-launcher /usr/local/libexec/asp-worker-wrapper' deploy/systemd/aspd-production.service)" -eq 2
+          test "$(grep -c '^TimeoutStartSec=5min$' deploy/systemd/aspd-production.service)" -eq 1
+          test "$(grep -c '<string>--production</string>' deploy/launchd/com.asp.aspd-production.plist)" -eq 1
+          test "$(grep -c '<string>--require-process-launcher</string>' deploy/launchd/com.asp.aspd-production.plist)" -eq 1
+          test "$(grep -c '<string>--stateless-retry</string>' deploy/launchd/com.asp.aspd-production.plist)" -eq 1
+          test "$(grep -c '<string>/usr/local/libexec/asp-worker-wrapper</string>' deploy/launchd/com.asp.aspd-production.plist)" -eq 1
+          test "$(grep -c -- '--exec-timeout-seconds 3600' deploy/systemd/aspd.service)" -eq 2
+          test "$(grep -c -- '--min-free-bytes 1073741824' deploy/systemd/aspd.service)" -eq 2
+          test "$(grep -c -- '--disable-port-forwarding' deploy/systemd/aspd.service)" -eq 2
+          test "$(grep -c -- '--listen 0.0.0.0:4433' deploy/systemd/aspd.service)" -eq 2
+          test "$(grep -c -- '--allow-non-loopback' deploy/systemd/aspd.service)" -eq 2
+          grep -q -- '"--min-free-bytes", "1073741824"' deploy/container/Dockerfile
+          grep -q -- '"--disable-port-forwarding"' deploy/container/Dockerfile
+          grep -q -- '<string>--disable-port-forwarding</string>' deploy/launchd/com.asp.aspd.plist
+          grep -q -- '<string>/usr/local/lib/asp/current/bin/aspd</string>' deploy/launchd/com.asp.aspd.plist
+          grep -q -- '--port-target' docs/PROTOCOL.md
+          grep -q 'asp_port_target_rejections_total' docs/OPERATIONS.md
+          grep -q 'asp_pty_input_write_timeouts_total' docs/OPERATIONS.md
+          grep -q 'asp_process_log_sync_failures_total' docs/OPERATIONS.md
+          grep -q 'asp_storage_maintenance_unhealthy' docs/OPERATIONS.md
+          grep -q 'asp_storage_maintenance_runs_total' docs/PRODUCTION_READINESS.md
+          grep -q 'write_async' crates/asp-pty/src/lib.rs
+          grep -q -- '--min-free-bytes' docs/PRODUCTION_READINESS.md
+          grep -q 'asp_storage_headroom_rejections_total' docs/OPERATIONS.md
+          grep -q 'ASP_LISTEN' README.md
+          grep -q 'ASP_SERVER' README.md
+          grep -q 'ASP_PROCESS_LAUNCHER' docs/OPERATIONS.md
+          grep -q 'daemon_deployment_options_publish_environment_defaults' crates/asp-server/src/main.rs
+          grep -q 'stateless_retry' crates/asp-server/src/main.rs
+          grep -q 'asp_quic_stateless_retry_enabled' docs/OPERATIONS.md
+          grep -q 'asp_quic_stateless_retries_total' docs/OPERATIONS.md
+          grep -q 'production_workspace_root_rejects_final_symlink_before_resolution' crates/asp-server/src/main.rs
+          grep -q 'reject_untrusted_prefix_symlinks' deploy/install-release.sh
+          grep -q -- '--validate-prefix' deploy/install-release.sh
+          grep -q -- '--validate-prefix' deploy/upgrade-release.sh
+          grep -q 'group/world-writable existing directories in any component of `--prefix`' README.md
+
+      - name: Check benchmark qualification invariants
+        run: |
+          fixture="$(mktemp)"
+          mismatch="$(mktemp)"
+          for trial in 1 2; do
+            jq -cn --argjson trial "$trial" \
+              '{experiment:"fixture",system:"asp",scenario:"paired",trial:$trial,status:0}'
+            jq -cn --argjson trial "$trial" \
+              '{experiment:"fixture",system:"ssh",scenario:"paired",trial:$trial,status:0}'
+          done >"$fixture"
+          bash benchmarks/qualify-results.sh "$fixture" 2 >/dev/null
+          jq -cn '{experiment:"fixture",system:"asp",scenario:"mismatch",trial:1,status:0}' >"$mismatch"
+          jq -cn '{experiment:"fixture",system:"ssh",scenario:"mismatch",trial:2,status:0}' >>"$mismatch"
+          if bash benchmarks/qualify-results.sh "$mismatch" 1 >/dev/null 2>&1; then
+            echo 'benchmark qualifier accepted mismatched trial IDs' >&2
+            exit 1
+          fi
+          agent_ok="$(mktemp)"
+          agent_bad="$(mktemp)"
+          for trial in 1 2; do
+            jq -cn --argjson trial "$trial" \
+              '{experiment:"agent-workload",system:"asp",scenario:"paired",trial:$trial,status:0,client_user_cpu_ms:1,client_system_cpu_ms:1,client_max_rss_kb:1,interface_rx_bytes:1,interface_tx_bytes:1,aspd_user_cpu_ms:1,aspd_system_cpu_ms:1,aspd_rss_kb:1}'
+            jq -cn --argjson trial "$trial" \
+              '{experiment:"agent-workload",system:"ssh-controlmaster",scenario:"paired",trial:$trial,status:0,client_user_cpu_ms:1,client_system_cpu_ms:1,client_max_rss_kb:1,interface_rx_bytes:1,interface_tx_bytes:1}'
+          done >"$agent_ok"
+          bash benchmarks/qualify-results.sh "$agent_ok" 2 >/dev/null
+          jq -cn '{experiment:"agent-workload",system:"asp",scenario:"paired",trial:1,status:0}' >"$agent_bad"
+          if bash benchmarks/qualify-results.sh "$agent_bad" 1 >/dev/null 2>&1; then
+            echo 'benchmark qualifier accepted agent rows without resource metrics' >&2
+            exit 1
+          fi
+          agent_negative="$(mktemp)"
+          jq -cn '{experiment:"agent-workload",system:"asp",scenario:"paired",trial:1,status:0,client_user_cpu_ms:1,client_system_cpu_ms:1,client_max_rss_kb:1,interface_rx_bytes:-1,interface_tx_bytes:1,aspd_user_cpu_ms:1,aspd_system_cpu_ms:1,aspd_rss_kb:1}' >"$agent_negative"
+          if bash benchmarks/qualify-results.sh "$agent_negative" 1 >/dev/null 2>&1; then
+            echo 'benchmark qualifier accepted a negative interface-byte metric' >&2
+            exit 1
+          fi
+          agent_fractional="$(mktemp)"
+          jq -cn '{experiment:"agent-workload",system:"asp",scenario:"paired",trial:1,status:0,client_user_cpu_ms:1,client_system_cpu_ms:1,client_max_rss_kb:1,interface_rx_bytes:1.5,interface_tx_bytes:1,aspd_user_cpu_ms:1,aspd_system_cpu_ms:1,aspd_rss_kb:1}' >"$agent_fractional"
+          if bash benchmarks/qualify-results.sh "$agent_fractional" 1 >/dev/null 2>&1; then
+            echo 'benchmark qualifier accepted a fractional interface-byte counter' >&2
+            exit 1
+          fi
+          bash benchmarks/qualify-results.sh \
+            benchmarks/raw/docker-command-latency-2026-08-27-30trials.jsonl \
+            30 command-latency >/dev/null
+          if bash benchmarks/qualify-results.sh "$fixture" 2 command-latency >/dev/null 2>&1; then
+            echo 'benchmark qualifier accepted an incomplete command-latency matrix' >&2
+            exit 1
+          fi
+          agent_exact="$(mktemp)"
+          agent_summary="$(mktemp)"
+          for trial in 1 2; do
+            jq -cn --argjson trial "$trial" \
+              '{experiment:"agent-workload",system:"asp",scenario:"contract",trial:$trial,status:0,summary_output:false,summary_tail_bytes:8192,application_round_trips:12,transport_connections:2,application_payload_bytes:1000,wall_ms:20,network_blocked_ms:10,recovery_ms:3,disconnect_seconds:0,resumed_events:1,persistent_process_observed:true,quic_tx_datagrams:1,quic_tx_bytes:1,quic_rx_datagrams:1,quic_rx_bytes:1,quic_lost_packets:0,quic_congestion_events:0,quic_last_path_rtt_us:1,client_user_cpu_ms:1,client_system_cpu_ms:1,client_max_rss_kb:1,interface_rx_bytes:1100,interface_tx_bytes:1200,aspd_user_cpu_ms:1,aspd_system_cpu_ms:1,aspd_rss_kb:1}'
+            jq -cn --argjson trial "$trial" \
+              '{experiment:"agent-workload",system:"ssh-controlmaster",scenario:"contract",trial:$trial,status:0,application_round_trips:18,transport_connections:2,application_payload_bytes:1000,wall_ms:25,network_blocked_ms:11,recovery_ms:4,disconnect_seconds:0,persistent_process_observed:true,client_user_cpu_ms:1,client_system_cpu_ms:1,client_max_rss_kb:1,interface_rx_bytes:1,interface_tx_bytes:1}'
+          done >"$agent_exact"
+          bash benchmarks/summarize-results.sh "$agent_exact" \
+            | jq -e 'any(.[]; .wall_ms.samples == 2 and .wall_ms.p50 == 20)' >/dev/null
+          agent_negative_timing="$(mktemp)"
+          jq -c 'if .system == "asp" then .wall_ms = -1 else . end' \
+            "$agent_exact" >"$agent_negative_timing"
+          if bash benchmarks/qualify-results.sh "$agent_negative_timing" 2 agent-workload >/dev/null 2>&1; then
+            echo 'strict agent qualifier accepted a negative wall-time metric'
+            exit 1
+          fi
+          for trial in 1 2; do
+            jq -cn --argjson trial "$trial" \
+              '{experiment:"agent-workload",system:"asp",scenario:"contract",trial:$trial,status:0,summary_output:true,summary_tail_bytes:8192,application_round_trips:12,transport_connections:2,application_payload_bytes:100,wall_ms:19,network_blocked_ms:9,recovery_ms:2,disconnect_seconds:0,resumed_events:1,persistent_process_observed:true,quic_tx_datagrams:1,quic_tx_bytes:1,quic_rx_datagrams:1,quic_rx_bytes:1,quic_lost_packets:0,quic_congestion_events:0,quic_last_path_rtt_us:1,client_user_cpu_ms:1,client_system_cpu_ms:1,client_max_rss_kb:1,interface_rx_bytes:200,interface_tx_bytes:300,aspd_user_cpu_ms:1,aspd_system_cpu_ms:1,aspd_rss_kb:1}'
+            jq -cn --argjson trial "$trial" \
+              '{experiment:"agent-workload",system:"ssh-controlmaster",scenario:"contract",trial:$trial,status:0,application_round_trips:18,transport_connections:2,application_payload_bytes:1000,wall_ms:25,network_blocked_ms:11,recovery_ms:4,disconnect_seconds:0,persistent_process_observed:true,client_user_cpu_ms:1,client_system_cpu_ms:1,client_max_rss_kb:1,interface_rx_bytes:1,interface_tx_bytes:1}'
+          done >"$agent_summary"
+          bash benchmarks/compare-agent-contracts.sh "$agent_exact" "$agent_summary" 2 \
+            | jq -e '.[0].application_payload_reduction.p50 == 0.9 and .[0].interface_bytes_reduction.p50 == (1800 / 2300)' >/dev/null
+
+      - name: Run Clippy
+        run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+
+      - name: Run release tests
+        run: cargo test --locked --workspace --all-targets --all-features --release
+
+      - name: Run documentation tests
+        run: cargo test --locked --workspace --doc --release
+
+      - name: Build release binaries
+        run: cargo build --locked --workspace --all-features --release
+
+      - name: Build and verify release archive
+        run: |
+          bundle_dir="$(mktemp -d)"
+          repeat_dir="$(mktemp -d)"
+          deploy/package-release.sh "$bundle_dir"
+          archive="$(find "$bundle_dir" -maxdepth 1 -name '*.tar.gz' -print -quit)"
+          checksum="$(find "$bundle_dir" -maxdepth 1 -name '*.sha256' -print -quit)"
+          test -n "$archive"
+          test -n "$checksum"
+          test -r "$archive"
+          test -r "$checksum"
+          deploy/verify-release.sh "$archive" "$checksum"
+          unsafe_stage="$(mktemp -d)"
+          tar -xzf "$archive" -C "$unsafe_stage"
+          mkfifo "$unsafe_stage/unsafe.fifo"
+          unsafe_archive="$repeat_dir/asp-0.1.0-special-file.tar.gz"
+          unsafe_checksum="$repeat_dir/asp-0.1.0-special-file.sha256"
+          tar -czf "$unsafe_archive" -C "$unsafe_stage" .
+          if command -v shasum >/dev/null 2>&1; then
+            (cd "$repeat_dir" && shasum -a 256 "$(basename "$unsafe_archive")" >"$(basename "$unsafe_checksum")")
+          else
+            (cd "$repeat_dir" && sha256sum "$(basename "$unsafe_archive")" >"$(basename "$unsafe_checksum")")
+          fi
+          if deploy/verify-release.sh "$unsafe_archive" "$unsafe_checksum" >/dev/null 2>&1; then
+            echo 'release verifier accepted a special file entry' >&2
+            exit 1
+          fi
+          # The standalone verifier is also an input boundary.  A basename
+          # beginning with a dash must be rejected before any platform tar
+          # implementation can interpret it as an option.
+          option_archive="$repeat_dir/-checkpoint-action=exec=echo-pwn.tar.gz"
+          option_checksum="$repeat_dir/-checkpoint-action=exec=echo-pwn.sha256"
+          cp "$archive" "$option_archive"
+          if command -v shasum >/dev/null 2>&1; then
+            (cd "$repeat_dir" && shasum -a 256 -- "$(basename "$option_archive")" >"$(basename "$option_checksum")")
+          else
+            (cd "$repeat_dir" && sha256sum -- "$(basename "$option_archive")" >"$(basename "$option_checksum")")
+          fi
+          if (cd "$repeat_dir" && "$GITHUB_WORKSPACE/deploy/verify-release.sh" \
+              "$(basename "$option_archive")" "$(basename "$option_checksum")") >/dev/null 2>&1; then
+            echo 'release verifier accepted a tar-option-shaped archive name' >&2
+            exit 1
+          fi
+          # A checksum sidecar must identify only its corresponding archive;
+          # it must not be allowed to make the verifier probe another path.
+          sidecar_archive="$repeat_dir/asp-0.1.0-sidecar-check.tar.gz"
+          sidecar_checksum="$repeat_dir/asp-0.1.0-sidecar-check.sha256"
+          cp "$archive" "$sidecar_archive"
+          if command -v shasum >/dev/null 2>&1; then
+            archive_digest="$(shasum -a 256 -- "$sidecar_archive" | awk '{print $1}')"
+          else
+            archive_digest="$(sha256sum -- "$sidecar_archive" | awk '{print $1}')"
+          fi
+          printf '%s  /etc/passwd\n' "$archive_digest" >"$sidecar_checksum"
+          if deploy/verify-release.sh "$sidecar_archive" "$sidecar_checksum" >/dev/null 2>&1; then
+            echo 'release verifier accepted a checksum sidecar naming another path' >&2
+            exit 1
+          fi
+          oversized_archive="$repeat_dir/asp-0.1.0-sidecar-size.tar.gz"
+          oversized_checksum="$repeat_dir/asp-0.1.0-sidecar-size.sha256"
+          cp "$archive" "$oversized_archive"
+          printf '%*s' 16385 '' >"$oversized_checksum"
+          if deploy/verify-release.sh "$oversized_archive" "$oversized_checksum" >/dev/null 2>&1; then
+            echo 'release verifier accepted an oversized checksum sidecar' >&2
+            exit 1
+          fi
+          # Keep a malformed archive from forcing an unbounded metadata scan
+          # or extraction.  Empty files keep this regression fixture small
+          # while still crossing the verifier's 4096-entry safety limit.
+          many_stage="$(mktemp -d)"
+          for ((index = 1; index <= 4097; index++)); do
+            : >"$many_stage/file-$index"
+          done
+          many_archive="$repeat_dir/asp-0.1.0-entry-limit.tar.gz"
+          many_checksum="$repeat_dir/asp-0.1.0-entry-limit.sha256"
+          tar -czf "$many_archive" -C "$many_stage" .
+          if command -v shasum >/dev/null 2>&1; then
+            (cd "$repeat_dir" && shasum -a 256 -- "$(basename "$many_archive")" >"$(basename "$many_checksum")")
+          else
+            (cd "$repeat_dir" && sha256sum -- "$(basename "$many_archive")" >"$(basename "$many_checksum")")
+          fi
+          if deploy/verify-release.sh "$many_archive" "$many_checksum" >/dev/null 2>&1; then
+            echo 'release verifier accepted an archive with too many entries' >&2
+            exit 1
+          fi
+          test -z "$(tar -tzf "$archive" | LC_ALL=C sort | uniq -d)"
+          tar -tzf "$archive" | grep -E '^\./bin/asp$' >/dev/null
+          tar -tzf "$archive" | grep -E '^\./bin/aspd$' >/dev/null
+          tar -tzf "$archive" | grep -E '^\./LICENSE-MIT$' >/dev/null
+          tar -tzf "$archive" | grep -E '^\./LICENSE-APACHE$' >/dev/null
+          tar -tzf "$archive" | grep -E '^\./deploy/systemd/aspd.service$' >/dev/null
+          tar -tzf "$archive" | grep -E '^\./deploy/systemd/aspd-production.service$' >/dev/null
+          tar -tzf "$archive" | grep -E '^\./deploy/launchd/com.asp.aspd.plist$' >/dev/null
+          tar -tzf "$archive" | grep -E '^\./deploy/launchd/com.asp.aspd-production.plist$' >/dev/null
+          tar -tzf "$archive" | grep -E '^\./deploy/container/Dockerfile$' >/dev/null
+          tar -tzf "$archive" | grep -E '^\./deploy/verify-release.sh$' >/dev/null
+          tar -tzf "$archive" | grep -E '^\./deploy/install-release.sh$' >/dev/null
+          tar -tzf "$archive" | grep -E '^\./deploy/upgrade-release.sh$' >/dev/null
+          tar -tzf "$archive" | grep -E '^\./deploy/bootstrap-client.sh$' >/dev/null
+          tar -tzf "$archive" | grep -E '^\./deploy/generate-sbom.sh$' >/dev/null
+          tar -tzf "$archive" | grep -E '^\./SBOM.spdx.json$' >/dev/null
+          tar -tzf "$archive" | grep -E '^\./docs/ARCHITECTURE.md$' >/dev/null
+          tar -tzf "$archive" | grep -E '^\./docs/SCHEMA.md$' >/dev/null
+          jq -e '.spdxVersion == "SPDX-2.3" and (.packages | length > 0)' <(tar -xOzf "$archive" ./SBOM.spdx.json) >/dev/null
+          # The release script normalizes file order, metadata, and the gzip
+          # header. Rebuilding without source changes must produce the exact
+          # same bytes, otherwise checksums cannot identify a reproducible
+          # deployment artifact.
+          deploy/package-release.sh "$repeat_dir"
+          repeat_archive="$(find "$repeat_dir" -maxdepth 1 -name '*.tar.gz' -print -quit)"
+          repeat_checksum="$(find "$repeat_dir" -maxdepth 1 -name '*.sha256' -print -quit)"
+          cmp "$archive" "$repeat_archive"
+          cmp "$checksum" "$repeat_checksum"
+          install_prefix="$(mktemp -d)"
+          deploy/install-release.sh --prefix "$install_prefix" "$archive" "$checksum"
+          test -L "$install_prefix/current"
+          test -x "$install_prefix/current/bin/asp"
+          test -x "$install_prefix/current/bin/aspd"
+          # Reusing the exact archive is idempotent. A copied archive with a
+          # distinct release name exercises the pointer switch and rollback
+          # path without requiring a second binary build in this job.
+          second_archive="$repeat_dir/asp-0.1.0-ci-second.tar.gz"
+          second_checksum="$repeat_dir/asp-0.1.0-ci-second.sha256"
+          archive_release_name="$(basename "$archive" .tar.gz)"
+          cp "$archive" "$second_archive"
+          if command -v shasum >/dev/null 2>&1; then
+            (cd "$repeat_dir" && shasum -a 256 "$(basename "$second_archive")" > "$(basename "$second_checksum")")
+          else
+            (cd "$repeat_dir" && sha256sum "$(basename "$second_archive")" > "$(basename "$second_checksum")")
+          fi
+          deploy/install-release.sh --prefix "$install_prefix" "$archive" "$checksum"
+          deploy/install-release.sh --prefix "$install_prefix" "$second_archive" "$second_checksum"
+          test "$(readlink "$install_prefix/current")" = "releases/asp-0.1.0-ci-second"
+          test "$(readlink "$install_prefix/previous")" = "releases/$archive_release_name"
+          deploy/install-release.sh --prefix "$install_prefix" --rollback
+          test "$(readlink "$install_prefix/current")" = "releases/$archive_release_name"
+          test "$(readlink "$install_prefix/previous")" = "releases/asp-0.1.0-ci-second"
+          # A rollback target must contain regular executable files, not just
+          # paths that happen to satisfy `-x` (directories are executable too).
+          # Tamper the temporary previous tree and require fail-closed behavior.
+          second_release="$install_prefix/releases/asp-0.1.0-ci-second"
+          mv "$second_release/bin/asp" "$second_release/bin/asp.saved"
+          mkdir "$second_release/bin/asp"
+          chmod 0755 "$second_release/bin/asp"
+          if deploy/install-release.sh --prefix "$install_prefix" --rollback >/dev/null 2>&1; then
+            echo 'installer accepted an executable directory as rollback binary' >&2
+            exit 1
+          fi
+          rmdir "$second_release/bin/asp"
+          mv "$second_release/bin/asp.saved" "$second_release/bin/asp"
+          # A release prefix is part of the supervisor trust boundary.  An
+          # attacker-controlled existing parent symlink must not be followed
+          # by the installer's `mkdir -p`; root-owned system aliases remain a
+          # separate, operator-owned case handled by the portable check.
+          prefix_link_root="$(mktemp -d)"
+          prefix_real="$prefix_link_root/real"
+          prefix_link="$prefix_link_root/link"
+          mkdir "$prefix_real"
+          ln -s "$prefix_real" "$prefix_link"
+          if deploy/install-release.sh --prefix "$prefix_link/asp" "$archive" "$checksum" >/dev/null 2>&1; then
+            echo 'installer followed an untrusted prefix symlink' >&2
+            exit 1
+          fi
+          # Existing non-symlink prefix components must not be mutable either;
+          # otherwise an attacker can replace a release pointer or redirect a
+          # later installation between the preflight and mkdir steps.
+          prefix_writable_root="$(mktemp -d)"
+          chmod 0777 "$prefix_writable_root"
+          if deploy/install-release.sh --prefix "$prefix_writable_root/asp" "$archive" "$checksum" >/dev/null 2>&1; then
+            echo 'installer accepted a group/world-writable prefix component' >&2
+            exit 1
+          fi
+
+      - name: Run QUIC stream/datagram migration smoke
+        run: cargo run --locked --release -p asp-bench -- quinn-smoke
+
+      - name: Run stream-frame compression regression
+        run: cargo run --locked --release -p asp-bench -- frame-compression
+
+      - name: Run bounded protocol decoder fuzz regression
+        run: bash benchmarks/smoke-protocol-fuzz.sh
+
+      - name: Run rich PTY DATAGRAM compression regression
+        run: cargo run --locked --release -p asp-bench -- pty-datagram-compression
+
+      - name: Run plain PTY state-delta codec regression
+        run: |
+          cargo run --locked --release -p asp-bench -- pty-state-delta \
+            | jq -e '
+                .experiment == "pty-state-delta" and
+                (.cases | map(select(.name == "localized-row" and .chooses_delta == true and .wire_saves_bytes > 0)) | length == 1) and
+                (.cases | map(select(.name == "broad-screen" and .chooses_delta == false)) | length == 1)'
+
+      - name: Run file-sync codec selection regression
+        run: |
+          cargo run --locked --release -p asp-bench -- file-sync \
+            | jq -e '
+                .experiment == "file-sync-wire" and
+                .protocol_version == 17 and
+                any(.cases[]; .name == "localized-source-edit" and .patch_wire_saves_bytes == 516 and .raw_policy_chooses_patch) and
+                any(.cases[]; .name == "scattered-source-edits" and .range_count == 3 and .range_wire_saves_bytes == 2458 and .raw_policy_chooses_ranges and .range_is_wire_win) and
+                any(.cases[]; .name == "scattered-equal-length-source-edits" and .range_count == 3 and .range_wire_saves_bytes == 409 and .raw_policy_chooses_ranges and .range_is_wire_win) and
+                any(.cases[]; .name == "compressible-broad-rewrite" and (.raw_policy_chooses_patch | not))
+              ' >/dev/null
+
+      - name: Check userspace impairment proxy CLI
+        run: cargo run --locked --release -p asp-bench -- udp-proxy --help | grep -F -- '--loss-percent' >/dev/null
+
+      - name: Check split-host qualification contract
+        run: bash benchmarks/smoke-two-host-contract.sh
+
+      - name: Run userspace UDP proxy end-to-end smoke
+        run: benchmarks/smoke-udp-proxy.sh
+
+      - name: Execute packaged release runtime smoke
+        run: |
+          package_dir="$(mktemp -d)"
+          deploy/package-release.sh "$package_dir"
+          archive="$(find "$package_dir" -maxdepth 1 -name '*.tar.gz' -print -quit)"
+          checksum="$(find "$package_dir" -maxdepth 1 -name '*.sha256' -print -quit)"
+          test -n "$archive"
+          test -n "$checksum"
+          deploy/verify-release.sh "$archive" "$checksum"
+          # Exercise the exact detached-signature helpers shipped in the
+          # archive, including fail-closed installer/upgrade enforcement.
+          # The smoke creates only an ephemeral CI key; promotion keys remain
+          # operator-owned and are never generated by this workflow.
+          bash benchmarks/smoke-release-signature.sh "$archive" "$checksum"
+          bash benchmarks/smoke-packaged-runtime.sh "$archive" "$checksum"
+          bash benchmarks/smoke-upgrade-release.sh "$archive" "$checksum"
+          # Same-archive input validates the two-direction harness mechanics;
+          # historical compatibility still requires an independently built
+          # artifact supplied by release qualification.
+          ASP_MIXED_RELEASE_ALLOW_SAME_ARCHIVE=1 \
+          ASP_MIXED_RELEASE_SIZE_MB=8 \
+          bash benchmarks/smoke-mixed-release.sh "$archive" "$archive" "$checksum" "$checksum"
+          if ASP_MIXED_RELEASE_SIZE_MB=8 \
+            bash benchmarks/smoke-mixed-release.sh "$archive" "$archive" "$checksum" "$checksum" >/dev/null 2>&1; then
+            echo 'mixed-release harness accepted same-build archives without explicit mechanics-only opt-in' >&2
+            exit 1
+          fi
+          if bash benchmarks/smoke-mixed-release.sh "$archive" "$archive" "$checksum" >/dev/null 2>&1; then
+            echo 'mixed-release harness accepted an archive without both checksum sidecars' >&2
+            exit 1
+          fi
+          extract_dir="$(mktemp -d)"
+          tar -xzf "$archive" -C "$extract_dir"
+          "$extract_dir/bin/asp" --version
+          "$extract_dir/bin/aspd" --help >/dev/null
+
+      - name: Run durable session restart smoke
+        run: bash benchmarks/smoke-persistence.sh
+
+      - name: Run idempotent connect lifecycle smoke
+        run: bash benchmarks/smoke-connect-idempotency.sh
+
+      - name: Run client error cleanup smoke
+        run: bash benchmarks/smoke-client-failure-cleanup.sh
+
+      - name: Run PTY reconnect smoke
+        run: bash benchmarks/smoke-pty-reconnect.sh
+
+      - name: Run PTY hard-kill reconnect smoke
+        run: ASP_PTY_RECONNECT_DAEMON_SIGNAL=KILL bash benchmarks/smoke-pty-reconnect.sh
+
+      - name: Run persistent agent adapter smoke
+        run: bash benchmarks/smoke-agent.sh
+
+      - name: Run warm agent reconnect smoke
+        run: bash benchmarks/smoke-agent-reconnect.sh
+
+      - name: Run event subscription reconnect smoke
+        run: bash benchmarks/smoke-events-reconnect.sh
+
+      - name: Run external filesystem event smoke
+        run: bash benchmarks/smoke-file-events.sh
+
+      - name: Run concurrent agent smoke
+        run: ASP_CONCURRENT_AGENTS=32 bash benchmarks/smoke-concurrent-agents.sh
+
+      - name: Run bounded capacity soak
+        run: |
+          ASP_CAPACITY_SOAK_WORKERS=4 \
+          ASP_CAPACITY_SOAK_SECONDS=5 \
+          ASP_CAPACITY_SOAK_INTERVAL_MS=100 \
+          bash benchmarks/smoke-capacity-soak.sh
+
+      - name: Bound overloaded capacity-soak drain
+        run: |
+          timeout_log="$(mktemp)"
+          if ASP_CAPACITY_SOAK_WORKERS=32 \
+            ASP_CAPACITY_SOAK_SECONDS=1 \
+            ASP_CAPACITY_SOAK_INTERVAL_MS=0 \
+            ASP_CAPACITY_SOAK_DRAIN_GRACE_SECONDS=1 \
+            bash benchmarks/smoke-capacity-soak.sh >"$timeout_log" 2>&1; then
+            echo 'overloaded capacity-soak unexpectedly passed' >&2
+            cat "$timeout_log" >&2
+            exit 1
+          fi
+          grep -q 'capacity-soak deadline exceeded' "$timeout_log"
+          rm -f "$timeout_log"
+
+      - name: Run capacity and rejection smoke
+        run: bash benchmarks/smoke-capacity-rejection.sh
+
+      - name: Run concurrent consumer cursor smoke
+        run: bash benchmarks/smoke-consumer-cursors.sh
+
+      - name: Run durable event cursor safety smoke
+        run: bash benchmarks/smoke-event-cursor-safety.sh
+
+      - name: Run supervised agent socket smoke
+        if: runner.os != 'Windows'
+        run: bash benchmarks/smoke-agent-socket.sh
+
+      - name: Run legacy v16 framing compatibility smoke
+        run: bash benchmarks/smoke-legacy.sh
+
+      - name: Run immutable artifact transfer smoke
+        run: bash benchmarks/smoke-artifacts.sh
+
+      - name: Run interrupted transfer restart smoke
+        run: |
+          ASP_TRANSFER_RESTART_SIZE_MB=32 \
+          bash benchmarks/smoke-transfer-restart.sh
+
+      - name: Run v16 to v17 transfer restart smoke
+        run: |
+          ASP_TRANSFER_RESTART_SIZE_MB=8 \
+          ASP_TRANSFER_RESTART_INITIAL_MAX_PROTOCOL_VERSION=16 \
+          ASP_TRANSFER_RESTART_RESTARTED_MAX_PROTOCOL_VERSION=17 \
+          bash benchmarks/smoke-transfer-restart.sh
+
+      - name: Run live TLS reload smoke
+        run: bash benchmarks/smoke-tls-reload.sh
+
+      - name: Run mTLS CA rotation smoke
+        run: bash benchmarks/smoke-mtls-ca-rotation.sh
+
+      - name: Run backup and restore smoke
+        run: bash benchmarks/smoke-backup-restore.sh
+
+      - name: Run EXEC timeout smoke
+        run: bash benchmarks/smoke-exec-timeout.sh
+
+      - name: Run EXEC timeout restart smoke
+        run: bash benchmarks/smoke-exec-timeout-restart.sh
+
+      - name: Run security exposure-policy smoke
+        run: bash benchmarks/smoke-security-policy.sh
+
+      - name: Run PORT_OPEN target-policy smoke
+        run: bash benchmarks/smoke-port-policy.sh
+
+      - name: Run production-policy fail-closed smoke
+        run: bash benchmarks/smoke-production-policy.sh
+
+      - name: Run SSH client bootstrap smoke
+        run: bash benchmarks/smoke-bootstrap-client.sh
+
+      - name: Run storage-headroom circuit-breaker smoke
+        run: bash benchmarks/smoke-storage-headroom.sh
+
+      - name: Run process-launcher boundary smoke
+        run: bash benchmarks/smoke-process-launcher.sh
+
+      - name: Run abrupt reconnect chaos smoke
+        run: bash benchmarks/smoke-reconnect-chaos.sh
+
+      - name: Run session lifecycle admin smoke
+        run: bash benchmarks/smoke-session-admin.sh
+
+      - name: Run container build and runtime smoke
+        if: runner.os == 'Linux'
+        run: bash benchmarks/smoke-container.sh
+
+      - name: Validate launchd template
+        if: runner.os == 'macOS'
+        run: |
+          plutil -lint deploy/launchd/com.asp.aspd.plist
+          plutil -lint deploy/launchd/com.asp.aspd-production.plist
+
+  windows-compile:
+    name: Windows compile and protocol tests
+    if: github.event_name != 'schedule'
+    runs-on: windows-latest
+    steps:
+      - name: Check out source
+        # v4.4.0 (tag 11d5960a326750d5838078e36cf38b85af677262)
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: Install pinned Rust toolchain
+        # stable branch at 4360b52568e2003a75bf9bc1d59f33a8e3fc893c
+        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c
+        with:
+          toolchain: 1.88.0
+          components: rustfmt, clippy
+
+      - name: Cache Cargo artifacts
+        # v2 tag commit 6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+
+      # The full deployment/smoke suite is Unix-oriented (tmux, launchd,
+      # systemd, and Linux netem). Keep a Windows gate for the portable wire
+      # and client/server compilation paths instead of implying untested
+      # service-manager behavior.
+      - name: Check locked Windows workspace
+        run: cargo check --locked --workspace --all-features
+
+      - name: Run portable protocol tests
+        run: cargo test --locked -p asp-protocol --all-features --release
+
+      - name: Check Windows formatting and lint
+        run: |
+          cargo fmt --all -- --check
+          cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+
+  audit:
+    name: dependency advisories
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        # v4.4.0 (tag 11d5960a326750d5838078e36cf38b85af677262)
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: Install cargo-audit
+        # v2 tag commit fcf5432d9f50d67e37ee6e29bdb7a224ff67b4a7
+        uses: taiki-e/install-action@fcf5432d9f50d67e37ee6e29bdb7a224ff67b4a7
+        with:
+          tool: cargo-audit
+
+      - name: Audit locked dependencies
+        run: cargo audit --deny warnings

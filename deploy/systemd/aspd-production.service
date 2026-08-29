@@ -1,0 +1,99 @@
+[Unit]
+Description=ASP agent session daemon (fail-closed production profile)
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=60s
+StartLimitBurst=5
+# The launcher is an operator-owned process boundary.  Refuse to start the
+# unit before ASP if the reviewed executable has not been installed.
+ConditionPathIsExecutable=/usr/local/libexec/asp-worker-wrapper
+
+[Service]
+Type=simple
+User=asp
+Group=asp
+WorkingDirectory=/srv/asp/workspace
+# `deploy/install-release.sh` publishes this supervisor-facing pointer. Never
+# copy a new binary over a running path; install a versioned release, validate
+# it, then deliberately restart this unit.
+ExecStartPre=/usr/local/lib/asp/current/bin/aspd \
+  --production \
+  --validate-config \
+  --listen 0.0.0.0:4433 \
+  --allow-non-loopback \
+  --stateless-retry \
+  --root /srv/asp/workspace \
+  --cert /srv/asp/workspace/.asp/server-cert.der \
+  --key /srv/asp/workspace/.asp/server-key.der \
+  --auth-token-file /srv/asp/workspace/.asp/auth-token \
+  --process-launcher /usr/local/libexec/asp-worker-wrapper \
+  --require-process-launcher \
+  --process-memory-bytes 2147483648 \
+  --process-cpu-seconds 86400 \
+  --exec-timeout-seconds 3600 \
+  --min-free-bytes 1073741824 \
+  --artifact-retention-hours 720 \
+  --shutdown-grace-seconds 10 \
+  --health-listen 127.0.0.1:9443 \
+  --disable-port-forwarding
+ExecStart=/usr/local/lib/asp/current/bin/aspd \
+  --production \
+  --listen 0.0.0.0:4433 \
+  --allow-non-loopback \
+  --stateless-retry \
+  --root /srv/asp/workspace \
+  --cert /srv/asp/workspace/.asp/server-cert.der \
+  --key /srv/asp/workspace/.asp/server-key.der \
+  --auth-token-file /srv/asp/workspace/.asp/auth-token \
+  --process-launcher /usr/local/libexec/asp-worker-wrapper \
+  --require-process-launcher \
+  --process-memory-bytes 2147483648 \
+  --process-cpu-seconds 86400 \
+  --exec-timeout-seconds 3600 \
+  --min-free-bytes 1073741824 \
+  --artifact-retention-hours 720 \
+  --shutdown-grace-seconds 10 \
+  --health-listen 127.0.0.1:9443 \
+  --disable-port-forwarding
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=1s
+# WAL replay and process/PTY recovery can be slow on a large durable
+# workspace. Keep the production preflight/startup budget aligned with the
+# pilot unit instead of inheriting systemd's shorter default timeout.
+TimeoutStartSec=5min
+# ASP sessions intentionally outlive a daemon/client restart; the default
+# control-group mode would terminate every supervised child on stop.
+KillMode=process
+TimeoutStopSec=30s
+UMask=0077
+LimitNOFILE=65536
+TasksMax=512
+MemoryAccounting=true
+MemoryMax=2G
+CPUAccounting=true
+CPUQuota=200%
+TasksAccounting=true
+NoNewPrivileges=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+# Keep /tmp visible to a surviving tmux child.  A deployment that moves tmux
+# to a persistent socket directory may enable PrivateTmp after qualification.
+PrivateTmp=false
+PrivateDevices=false
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelLogs=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+SystemCallArchitectures=native
+LockPersonality=true
+ReadWritePaths=/srv/asp/workspace
+
+[Install]
+WantedBy=multi-user.target

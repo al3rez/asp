@@ -1,0 +1,1 @@
+{"experiment":"pty-rich-datagram-compression","mtu_bytes":1200,"rich_input_bytes":7751,"plain_datagram_bytes":7777,"plain_fits":false,"compressed_datagram_bytes":348,"compressed_fits":true,"decoded_matches":true}

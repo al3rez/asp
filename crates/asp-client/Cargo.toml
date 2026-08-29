@@ -1,0 +1,28 @@
+[package]
+name = "asp-client"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description.workspace = true
+readme.workspace = true
+publish = false
+
+[[bin]]
+name = "asp"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+asp-protocol = { path = "../asp-protocol", version = "0.1.0" }
+base64.workspace = true
+clap.workspace = true
+fs2.workspace = true
+libc.workspace = true
+quinn.workspace = true
+rustls.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+tokio.workspace = true
+uuid.workspace = true

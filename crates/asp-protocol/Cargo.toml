@@ -1,0 +1,27 @@
+[package]
+name = "asp-protocol"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description.workspace = true
+readme.workspace = true
+# Keep the machine-readable registry inside the publishable crate.  The
+# protocol tests run from a packaged tarball as well as from the workspace.
+include = [
+    "src/**",
+    "schema.json",
+    "README.md",
+    "Cargo.toml",
+    "LICENSE-MIT",
+    "LICENSE-APACHE",
+]
+
+[dependencies]
+anyhow.workspace = true
+flate2.workspace = true
+postcard.workspace = true
+quinn.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true

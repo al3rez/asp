@@ -1,0 +1,100 @@
+[Unit]
+Description=ASP agent session daemon
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=60s
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=asp
+Group=asp
+WorkingDirectory=/srv/asp/workspace
+# `deploy/install-release.sh` publishes this supervisor-facing pointer. Never
+# copy a new binary over a running path; install a versioned release, validate
+# it, then deliberately restart this unit.
+ExecStartPre=/usr/local/lib/asp/current/bin/aspd \
+  --validate-config \
+  --listen 0.0.0.0:4433 \
+  --allow-non-loopback \
+  --root /srv/asp/workspace \
+  --cert /srv/asp/workspace/.asp/server-cert.der \
+  --key /srv/asp/workspace/.asp/server-key.der \
+  --auth-token-file /srv/asp/workspace/.asp/auth-token \
+  --process-memory-bytes 2147483648 \
+  --process-cpu-seconds 86400 \
+  --exec-timeout-seconds 3600 \
+  --min-free-bytes 1073741824 \
+  --artifact-retention-hours 720 \
+  --shutdown-grace-seconds 10 \
+  --health-listen 127.0.0.1:9443 \
+  --disable-port-forwarding
+ExecStart=/usr/local/lib/asp/current/bin/aspd \
+  --listen 0.0.0.0:4433 \
+  --allow-non-loopback \
+  --root /srv/asp/workspace \
+  --cert /srv/asp/workspace/.asp/server-cert.der \
+  --key /srv/asp/workspace/.asp/server-key.der \
+  --auth-token-file /srv/asp/workspace/.asp/auth-token \
+  --process-memory-bytes 2147483648 \
+  --process-cpu-seconds 86400 \
+  --exec-timeout-seconds 3600 \
+  --min-free-bytes 1073741824 \
+  --artifact-retention-hours 720 \
+  --shutdown-grace-seconds 10 \
+  --health-listen 127.0.0.1:9443 \
+  --disable-port-forwarding
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=1s
+TimeoutStartSec=5min
+# ASP sessions intentionally outlive a daemon/client restart; the default
+# control-group mode would terminate every supervised child on stop.
+KillMode=process
+# The daemon drains requests for 10s, then syncs journals and the audit sink.
+# Leave supervisor headroom for those synchronous flushes before systemd's
+# final SIGKILL; setting this equal to --shutdown-grace-seconds can truncate
+# the last WAL/audit writes on a busy host.
+TimeoutStopSec=30s
+UMask=0077
+LimitNOFILE=65536
+TasksMax=512
+MemoryAccounting=true
+MemoryMax=2G
+CPUAccounting=true
+CPUQuota=200%
+TasksAccounting=true
+NoNewPrivileges=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+# Keep /tmp visible to a surviving tmux child. `KillMode=process` deliberately
+# leaves session children alive during an aspd restart, and tmux's default
+# control socket is under /tmp; a fresh PrivateTmp namespace would make the
+# durable PTY impossible to reattach. The dedicated `asp` account and the
+# filesystem/cgroup restrictions below remain in force.
+PrivateTmp=false
+# tmux-backed durable PTYs require /dev/ptmx and the devpts filesystem. Keep
+# the host device namespace visible and rely on the dedicated service account,
+# ProtectSystem/ProtectHome, syscall/address-family restrictions, and cgroup
+# limits below for the daemon boundary. A deployment that does not enable PTY
+# support may opt into PrivateDevices=true instead.
+PrivateDevices=false
+# Make the host filesystem read-only to the daemon; the workspace is the only
+# writable tree explicitly granted below. This is a supervisor boundary, not
+# a substitute for a per-workspace container/VM for hostile commands.
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelLogs=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+SystemCallArchitectures=native
+LockPersonality=true
+ReadWritePaths=/srv/asp/workspace
+
+[Install]
+WantedBy=multi-user.target

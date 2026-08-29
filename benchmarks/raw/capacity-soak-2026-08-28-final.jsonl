@@ -1,0 +1,1 @@
+{"experiment":"capacity-soak","workers":8,"duration_seconds":60,"interval_ms":100,"responses":5116,"wall_ms":92000,"request_delta":2566,"response_bytes_delta":328339,"process_cpu_delta_us":5851735,"status":0}
