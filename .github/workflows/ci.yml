@@ -37,7 +37,7 @@ jobs:
 
       - name: Cache Cargo artifacts
         # v2 tag commit 6323deb102c322ba6fcbdcafc7e3dddab59af2b6
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0
 
       - name: Check formatting
         run: cargo fmt --all -- --check
@@ -740,7 +740,7 @@ jobs:
 
       - name: Cache Cargo artifacts
         # v2 tag commit 6323deb102c322ba6fcbdcafc7e3dddab59af2b6
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0
 
       # The full deployment/smoke suite is Unix-oriented (tmux, launchd,
       # systemd, and Linux netem). Keep a Windows gate for the portable wire
