@@ -767,7 +767,7 @@ jobs:
 
       - name: Install cargo-audit
         # v2 tag commit fcf5432d9f50d67e37ee6e29bdb7a224ff67b4a7
-        uses: taiki-e/install-action@fcf5432d9f50d67e37ee6e29bdb7a224ff67b4a7
+        uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32
         with:
           tool: cargo-audit
 
